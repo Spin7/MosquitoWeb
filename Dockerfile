@@ -1,11 +1,13 @@
 FROM python:3.11-slim
 
-# Install system-level GIS / image dependencies
+# Install system-level GIS / image / OpenCV dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdal-dev \
     libgeos-dev \
     libproj-dev \
     libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
