@@ -9,4 +9,4 @@
  *   window.BACKEND_URL = "https://mosquitoai-backend.up.railway.app";
  *   window.BACKEND_URL = "http://localhost:8000";   // local dev
  */
-window.BACKEND_URL = "";   // ← Replace with your Railway URL before deploying
+window.BACKEND_URL = "https://web-production-90e52.up.railway.app";   // ← Replace with your Railway URL before deploying
