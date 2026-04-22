@@ -24,4 +24,5 @@ RUN mkdir -p models
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn Server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Python reads PORT from os.getenv() — no shell expansion needed
+CMD ["python", "Server.py"]

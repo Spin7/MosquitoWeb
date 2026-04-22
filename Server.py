@@ -603,14 +603,16 @@ async def upload_data(
 # MAIN
 # ==============================
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8000"))
+
     if NGROK_TOKEN:
         try:
             from pyngrok import ngrok
-            ngrok_tunnel = ngrok.connect(8000)
+            ngrok_tunnel = ngrok.connect(port)
             print("Public URL:", ngrok_tunnel)
         except Exception as e:
             print(f"[ngrok] Could not start tunnel: {e}")
     else:
-        print("[ngrok] NGROK_TOKEN not set — running on localhost only.")
+        print(f"[ngrok] NGROK_TOKEN not set — running on localhost:{port}")
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=port)
