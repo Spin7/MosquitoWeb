@@ -6,8 +6,10 @@ import base64
 import io
 import math
 import asyncio
+import threading
 import numpy as np
 import cv2
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, Form, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -29,12 +31,70 @@ except ImportError:
 from utils.cascade_inference import CascadeInference
 
 # ==============================
+# MODEL DIR
+# ==============================
+_MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+_cascade: CascadeInference | None = None
+
+
+def _load_models_background():
+    """Download ONNX models and load them. Runs in a background thread so
+    uvicorn can start accepting requests (and pass the healthcheck) immediately."""
+    global _cascade
+
+    SUPABASE_URL_LOCAL = os.getenv("SUPABASE_URL")
+    os.makedirs(_MODEL_DIR, exist_ok=True)
+    model_files = ["yolo_model.onnx", "Mobilnet_mode.onnx"]
+
+    if SUPABASE_URL_LOCAL:
+        for model_file in model_files:
+            local_path = os.path.join(_MODEL_DIR, model_file)
+            if os.path.exists(local_path):
+                print(f"[models] ✓ {model_file} cached ({os.path.getsize(local_path) // 1024} KB).")
+                continue
+            url = f"{SUPABASE_URL_LOCAL}/storage/v1/object/public/models/{model_file}"
+            print(f"[models] Downloading {model_file} ...")
+            try:
+                import requests as _req
+                r = _req.get(url, stream=True, timeout=180)
+                r.raise_for_status()
+                with open(local_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"[models] ✓ {model_file} downloaded ({os.path.getsize(local_path) // 1024} KB).")
+            except Exception as e:
+                print(f"[models] ✗ Failed to download {model_file}: {e}")
+    else:
+        print("[models] SUPABASE_URL not set — skipping download.")
+
+    try:
+        _cascade = CascadeInference(
+            det_path=os.path.join(_MODEL_DIR, "yolo_model.onnx"),
+            cls_path=os.path.join(_MODEL_DIR, "Mobilnet_mode.onnx"),
+        )
+        print("[models] ✓ ONNX models loaded successfully.")
+    except Exception as e:
+        print(f"[models] WARNING — Could not load ONNX models: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start model loading in a daemon thread so the server is immediately healthy."""
+    thread = threading.Thread(target=_load_models_background, daemon=True, name="model-loader")
+    thread.start()
+    print("[startup] Model loading started in background thread.")
+    yield
+    # Nothing special needed on shutdown
+
+
+# ==============================
 # APP
 # ==============================
 app = FastAPI(
     title="MosquitoAI API",
     version="1.0.0",
     description="REST API for mosquito detection, ABM simulation and dashboard data.",
+    lifespan=lifespan,
 )
 
 # ==============================
@@ -66,51 +126,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==============================
-# MODEL DOWNLOAD & LOAD
-# ==============================
-_MODEL_DIR = os.path.join(BASE_DIR, "models")
-_cascade: CascadeInference | None = None
 
-
-def download_models_if_needed():
-    """Download ONNX models from Supabase Storage if not already cached locally."""
-    os.makedirs(_MODEL_DIR, exist_ok=True)
-    model_files = ["yolo_model.onnx", "Mobilnet_mode.onnx"]
-
-    if not SUPABASE_URL:
-        print("[startup] SUPABASE_URL not set — skipping model download.")
-        return
-
-    for model_file in model_files:
-        local_path = os.path.join(_MODEL_DIR, model_file)
-        if os.path.exists(local_path):
-            print(f"[startup] ✓ {model_file} already cached ({os.path.getsize(local_path) // 1024} KB).")
-            continue
-
-        url = f"{SUPABASE_URL}/storage/v1/object/public/models/{model_file}"
-        print(f"[startup] Downloading {model_file} from {url} ...")
-        try:
-            r = requests.get(url, stream=True, timeout=180)
-            r.raise_for_status()
-            with open(local_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            print(f"[startup] ✓ {model_file} downloaded ({os.path.getsize(local_path) // 1024} KB).")
-        except Exception as e:
-            print(f"[startup] ✗ Failed to download {model_file}: {e}")
-
-
-download_models_if_needed()
-
-try:
-    _cascade = CascadeInference(
-        det_path=os.path.join(_MODEL_DIR, "yolo_model.onnx"),
-        cls_path=os.path.join(_MODEL_DIR, "Mobilnet_mode.onnx"),
-    )
-    print("[Server] ONNX models loaded successfully.")
-except Exception as e:
-    print(f"[Server] WARNING — Could not load ONNX models: {e}")
 
 
 # ==============================
